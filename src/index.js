@@ -7,7 +7,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 const server = new Server(
-  { name: 'coinley-mcp', version: '0.1.0' },
+  { name: 'coinley-mcp', version: '0.1.1' },
   { capabilities: { tools: {} } }
 );
 
@@ -81,6 +81,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ['apiBaseUrl', 'paymentId'],
       },
     },
+    {
+      name: 'read_merchant_config',
+      description: 'Fetch a merchant\'s webpage and extract the Coinley API URL and public key from its meta tags. Use this when the user provides a merchant URL so you can auto-discover credentials without asking them. Look for <meta name="coinley:api"> and <meta name="coinley:public-key">.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          pageUrl: {
+            type: 'string',
+            description: 'URL of the merchant page to read (e.g. https://store.example.com)',
+          },
+        },
+        required: ['pageUrl'],
+      },
+    },
   ],
 }));
 
@@ -125,6 +139,39 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const res = await fetch(`${args.apiBaseUrl}/api/deposits/status/${args.paymentId}`);
       const data = await res.json();
       return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+
+    if (name === 'read_merchant_config') {
+      const res = await fetch(args.pageUrl, {
+        headers: { 'User-Agent': 'CoinleyAgent/0.1 (MCP; +https://github.com/coinleylabs/coinley-mcp)' },
+      });
+      const html = await res.text();
+
+      const extractMeta = (metaName, html) => {
+        const patterns = [
+          new RegExp(`<meta[^>]+name=["']${metaName}["'][^>]+content=["']([^"']+)["']`, 'i'),
+          new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${metaName}["']`, 'i'),
+        ];
+        for (const re of patterns) {
+          const m = html.match(re);
+          if (m) return m[1];
+        }
+        return null;
+      };
+
+      const apiBaseUrl = extractMeta('coinley:api', html);
+      const publicKey  = extractMeta('coinley:public-key', html);
+
+      if (!apiBaseUrl && !publicKey) {
+        return {
+          content: [{ type: 'text', text: 'No Coinley meta tags found. The merchant may not have enabled agent discovery (enableAgentDiscovery prop on CoinleyProvider).' }],
+          isError: true,
+        };
+      }
+
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ apiBaseUrl, publicKey }, null, 2) }],
+      };
     }
 
     return {

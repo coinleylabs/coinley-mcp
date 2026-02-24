@@ -187,6 +187,21 @@ Check the status of a payment. Poll this after sending tokens until `status` is 
 
 ---
 
+### `read_merchant_config`
+
+Fetch a merchant's page and extract the Coinley API URL and public key from its meta tags.
+Call this first when the user gives you a merchant URL instead of credentials directly.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `pageUrl` | string | ✅ | URL of the merchant page |
+
+**Returns:** `{ apiBaseUrl, publicKey }`
+
+`publicKey` will be `null` if the merchant has not opted in to agent discovery (i.e. `enableAgentDiscovery` is not set on their `CoinleyProvider`). `apiBaseUrl` is always present when Coinley is installed.
+
+---
+
 ## Complete Usage Walkthrough
 
 This is the full flow an agent follows to make a payment:
@@ -283,9 +298,17 @@ Common errors:
 
 ---
 
-## Example Claude Prompt
+## Example Prompts
 
-Once the MCP server is installed, an agent can be instructed like this:
+### With a merchant URL (recommended — no credentials needed)
+
+```
+Pay $10 on https://store.example.com. My agent ID is my-agent and owner is acme-corp.
+```
+
+Claude will call `read_merchant_config` → `list_networks` → `create_deposit_payment` → `get_payment_status`.
+
+### With explicit credentials (for developers/testing)
 
 ```
 You have access to the Coinley MCP server. Use it to pay $10 USDT on Base
