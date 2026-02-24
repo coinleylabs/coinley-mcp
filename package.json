@@ -1,0 +1,22 @@
+{
+  "name": "@coinley/mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server exposing Coinley crypto payment tools for AI agents",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "coinley-mcp": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": ["coinley", "mcp", "crypto", "payments", "ai-agents"],
+  "license": "MIT"
+}
