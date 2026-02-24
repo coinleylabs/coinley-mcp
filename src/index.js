@@ -89,7 +89,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     if (name === 'list_networks') {
-      const res = await fetch(`${args.apiBaseUrl}/api/deposit/chains`);
+      const res = await fetch(`${args.apiBaseUrl}/api/deposits/chains`);
       const data = await res.json();
       return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
     }
