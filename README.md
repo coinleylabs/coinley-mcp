@@ -53,7 +53,7 @@ Before using any tool you need:
 
 | Item | Where to get it |
 |------|----------------|
-| **API base URL** | Your Coinley server URL, e.g. `https://api.coinley.com` |
+| **API base URL** | Your Coinley server URL, e.g. `https://talented-mercy-production.up.railway.app` |
 | **Public key** | Merchant dashboard → API Keys. Format: `pk_live_...` or `pk_test_...` |
 | **Funded wallet** | An on-chain wallet the agent controls, holding the token it will send |
 
@@ -195,7 +195,7 @@ This is the full flow an agent follows to make a payment:
 
 ```
 Tool: list_networks
-Input: { "apiBaseUrl": "https://api.coinley.com" }
+Input: { "apiBaseUrl": "https://talented-mercy-production.up.railway.app" }
 ```
 
 Pick a network where the agent holds a sufficient token balance. Prefer networks with fast finality and low fees (e.g. `base`, `polygon`, `solana`).
@@ -207,7 +207,7 @@ Pick a network where the agent holds a sufficient token balance. Prefer networks
 ```
 Tool: create_deposit_payment
 Input: {
-  "apiBaseUrl": "https://api.coinley.com",
+  "apiBaseUrl": "https://talented-mercy-production.up.railway.app",
   "publicKey": "pk_live_abc123",
   "amount": 25.00,
   "network": "base",
@@ -234,7 +234,7 @@ Using your wallet/signing library, send exactly `25.00 USDT` on Base to the `dep
 ```
 Tool: get_payment_status
 Input: {
-  "apiBaseUrl": "https://api.coinley.com",
+  "apiBaseUrl": "https://talented-mercy-production.up.railway.app",
   "paymentId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 }
 ```
@@ -289,7 +289,7 @@ Once the MCP server is installed, an agent can be instructed like this:
 
 ```
 You have access to the Coinley MCP server. Use it to pay $10 USDT on Base
-to merchant public key pk_live_abc123 at https://api.coinley.com.
+to merchant public key pk_live_abc123 at https://talented-mercy-production.up.railway.app.
 My agent ID is "scheduler-v2" and owner is "acme-corp".
 After creating the payment, send the tokens and confirm completion.
 ```

@@ -21,7 +21,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           apiBaseUrl: {
             type: 'string',
-            description: 'Coinley API base URL (e.g. https://api.coinley.com)',
+            description: 'Coinley API base URL (e.g. https://talented-mercy-production.up.railway.app)',
           },
         },
         required: ['apiBaseUrl'],
