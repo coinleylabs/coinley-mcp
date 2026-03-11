@@ -6,8 +6,51 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 
+function getSuggestion(toolName, errorMessage) {
+  const msg = errorMessage || '';
+  if (msg.includes('agentId') || msg.includes('agentOwner')) {
+    return 'Both agentId and agentOwner must be provided together';
+  }
+  if (/invalid paymentid/i.test(msg)) {
+    return 'paymentId must be a UUID returned from create_deposit_payment';
+  }
+  if (msg.includes('401') || /unauthorized/i.test(msg)) {
+    return 'Check that your publicKey is correct and starts with pk_live_ or pk_test_';
+  }
+  if (msg.includes('404') || /not found/i.test(msg)) {
+    return 'Payment not found. Verify the paymentId is correct';
+  }
+  if (msg.includes('429') || /rate limit/i.test(msg)) {
+    return 'Rate limit exceeded. Wait 60 seconds before retrying';
+  }
+  if (/ECONNREFUSED|ENOTFOUND|fetch failed|network/i.test(msg)) {
+    return 'Cannot reach the Coinley API. Check that apiBaseUrl is correct';
+  }
+  return null;
+}
+
+function makeError(toolName, message, extra = {}) {
+  const obj = { error: true, tool: toolName, message, ...extra };
+  const suggestion = getSuggestion(toolName, message);
+  if (suggestion) obj.suggestion = suggestion;
+  return {
+    content: [{ type: 'text', text: JSON.stringify(obj, null, 2) }],
+    isError: true,
+  };
+}
+
+async function checkResponse(res, toolName) {
+  if (!res.ok) {
+    const errorBody = await res.json().catch(() => ({}));
+    return makeError(toolName, errorBody.message || res.statusText, {
+      httpStatus: res.status,
+    });
+  }
+  return null;
+}
+
 const server = new Server(
-  { name: 'coinley-mcp', version: '0.1.1' },
+  { name: 'coinley-mcp', version: '0.2.0' },
   { capabilities: { tools: {} } }
 );
 
@@ -61,6 +104,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: 'object',
             description: 'Optional additional metadata to attach to the payment',
           },
+          idempotencyKey: {
+            type: 'string',
+            description: 'Optional unique key to prevent duplicate payments. If a payment with this key already exists, the existing payment is returned instead of creating a new one.',
+          },
         },
         required: ['apiBaseUrl', 'publicKey', 'amount', 'network', 'agentId', 'agentOwner'],
       },
@@ -95,6 +142,59 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ['pageUrl'],
       },
     },
+    {
+      name: 'create_sandbox_payment',
+      description: 'Create a test payment in sandbox mode. No real funds needed. Returns a paymentId that can be simulated to completion or failure.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          apiBaseUrl: { type: 'string', description: 'Coinley API base URL' },
+          publicKey: {
+            type: 'string',
+            description: 'Merchant public key (pk_test_... or pk_live_...)',
+          },
+          amount: { type: 'number', description: 'Payment amount in USD' },
+          currency: {
+            type: 'string',
+            description: 'Token symbol: USDT or USDC',
+            default: 'USDT',
+          },
+          network: {
+            type: 'string',
+            description: 'Network shortname e.g. ethereum, base, polygon, solana',
+          },
+          metadata: {
+            type: 'object',
+            description: 'Optional additional metadata to attach to the payment',
+          },
+        },
+        required: ['apiBaseUrl', 'publicKey', 'amount'],
+      },
+    },
+    {
+      name: 'simulate_payment',
+      description: 'Simulate a sandbox payment completing or failing. Only works on payments created with create_sandbox_payment.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          apiBaseUrl: { type: 'string', description: 'Coinley API base URL' },
+          publicKey: {
+            type: 'string',
+            description: 'Merchant public key',
+          },
+          paymentId: {
+            type: 'string',
+            description: 'Payment ID returned from create_sandbox_payment',
+          },
+          action: {
+            type: 'string',
+            enum: ['complete', 'fail'],
+            description: "Simulate outcome: 'complete' or 'fail'",
+          },
+        },
+        required: ['apiBaseUrl', 'publicKey', 'paymentId', 'action'],
+      },
+    },
   ],
 }));
 
@@ -104,12 +204,50 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     if (name === 'list_networks') {
       const res = await fetch(`${args.apiBaseUrl}/api/deposits/chains`);
+      const httpErr = await checkResponse(res, name);
+      if (httpErr) return httpErr;
       const data = await res.json();
       return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
     }
 
     if (name === 'create_deposit_payment') {
+      const body = {
+        amount: args.amount,
+        currency: args.currency || 'USDT',
+        network: args.network,
+        agentId: args.agentId,
+        agentOwner: args.agentOwner,
+        metadata: args.metadata,
+      };
+      if (args.idempotencyKey) body.orderId = args.idempotencyKey;
       const res = await fetch(`${args.apiBaseUrl}/api/deposits/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-public-key': args.publicKey,
+        },
+        body: JSON.stringify(body),
+      });
+      const httpErr = await checkResponse(res, name);
+      if (httpErr) return httpErr;
+      const data = await res.json();
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+
+    if (name === 'get_payment_status') {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(args.paymentId)) {
+        return makeError(name, 'Invalid paymentId: must be a valid UUID');
+      }
+      const res = await fetch(`${args.apiBaseUrl}/api/deposits/status/${args.paymentId}`);
+      const httpErr = await checkResponse(res, name);
+      if (httpErr) return httpErr;
+      const data = await res.json();
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+
+    if (name === 'create_sandbox_payment') {
+      const res = await fetch(`${args.apiBaseUrl}/api/sandbox/payments/create`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -119,24 +257,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           amount: args.amount,
           currency: args.currency || 'USDT',
           network: args.network,
-          agentId: args.agentId,
-          agentOwner: args.agentOwner,
           metadata: args.metadata,
         }),
       });
+      const httpErr = await checkResponse(res, name);
+      if (httpErr) return httpErr;
       const data = await res.json();
       return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
     }
 
-    if (name === 'get_payment_status') {
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      if (!uuidRegex.test(args.paymentId)) {
-        return {
-          content: [{ type: 'text', text: 'Invalid paymentId: must be a valid UUID' }],
-          isError: true,
-        };
-      }
-      const res = await fetch(`${args.apiBaseUrl}/api/deposits/status/${args.paymentId}`);
+    if (name === 'simulate_payment') {
+      const res = await fetch(`${args.apiBaseUrl}/api/sandbox/payments/${args.paymentId}/simulate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-public-key': args.publicKey,
+        },
+        body: JSON.stringify({ action: args.action }),
+      });
+      const httpErr = await checkResponse(res, name);
+      if (httpErr) return httpErr;
       const data = await res.json();
       return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
     }
@@ -145,6 +285,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const res = await fetch(args.pageUrl, {
         headers: { 'User-Agent': 'CoinleyAgent/0.1 (MCP; +https://github.com/coinleylabs/coinley-mcp)' },
       });
+      const httpErr = await checkResponse(res, name);
+      if (httpErr) return httpErr;
       const html = await res.text();
 
       const extractMeta = (metaName, html) => {
@@ -163,10 +305,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const publicKey  = extractMeta('coinley:public-key', html);
 
       if (!apiBaseUrl && !publicKey) {
-        return {
-          content: [{ type: 'text', text: 'No Coinley meta tags found. The merchant may not have enabled agent discovery (enableAgentDiscovery prop on CoinleyProvider).' }],
-          isError: true,
-        };
+        return makeError(name, 'No Coinley meta tags found. The merchant may not have enabled agent discovery (enableAgentDiscovery prop on CoinleyProvider).');
       }
 
       return {
@@ -174,15 +313,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    return {
-      content: [{ type: 'text', text: `Unknown tool: ${name}` }],
-      isError: true,
-    };
+    return makeError(name, `Unknown tool: ${name}`);
   } catch (err) {
-    return {
-      content: [{ type: 'text', text: `Error calling ${name}: ${err.message}` }],
-      isError: true,
-    };
+    return makeError(name, err.message);
   }
 });
 
