@@ -115,6 +115,7 @@ Create a payment session and receive a unique deposit address. The agent sends t
 | `agentOwner` | string | ✅ | Human or entity accountable for this agent (e.g. `"acme-corp"`, `"user_123"`). Max 100 chars. |
 | `currency` | string | ❌ | `USDT` (default) or `USDC` |
 | `metadata` | object | ❌ | Arbitrary key-value pairs attached to the payment record |
+| `idempotencyKey` | string | ❌ | Unique key to prevent duplicate payments on retries. Stored as `orderId` in payment metadata for reconciliation. |
 
 **`agentId` rules:**
 - Must be alphanumeric with underscores/hyphens only: `^[a-zA-Z0-9_-]+$`
@@ -202,6 +203,69 @@ Call this first when the user gives you a merchant URL instead of credentials di
 
 ---
 
+### `create_sandbox_payment`
+
+Create a test payment in sandbox mode. No real funds are needed. Returns a `paymentId` that can be simulated to completion or failure using `simulate_payment`.
+
+**Input:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `apiBaseUrl` | string | ✅ | Coinley API base URL |
+| `publicKey` | string | ✅ | Merchant public key |
+| `amount` | number | ✅ | Payment amount in USD |
+| `currency` | string | ❌ | `USDT` (default) or `USDC` |
+| `network` | string | ❌ | Network shortname (e.g. `base`, `polygon`) |
+| `metadata` | object | ❌ | Arbitrary key-value pairs |
+
+**Returns:**
+
+```json
+{
+  "success": true,
+  "payment": {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "testPaymentId": "test_abc12345",
+    "amount": "10.000000",
+    "currency": "USDT",
+    "status": "pending",
+    "isTest": true,
+    "expiresAt": "2026-03-13T13:30:00.000Z"
+  }
+}
+```
+
+---
+
+### `simulate_payment`
+
+Simulate a sandbox payment completing or failing. Only works on payments created with `create_sandbox_payment`.
+
+**Input:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `apiBaseUrl` | string | ✅ | Coinley API base URL |
+| `publicKey` | string | ✅ | Merchant public key |
+| `paymentId` | string | ✅ | UUID returned from `create_sandbox_payment` |
+| `action` | string | ✅ | `complete` or `fail` |
+
+**Returns:**
+
+```json
+{
+  "success": true,
+  "payment": {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "status": "completed",
+    "transactionHash": "0xfake...",
+    "isTest": true
+  }
+}
+```
+
+---
+
 ## Complete Usage Walkthrough
 
 This is the full flow an agent follows to make a payment:
@@ -277,24 +341,72 @@ If you receive a `429` response, back off for 60 seconds before retrying.
 
 ## Error Handling
 
-All tools return errors in this shape:
+All tools return structured error objects with actionable suggestions:
 
 ```json
 {
-  "success": false,
-  "message": "Human-readable error description"
+  "error": true,
+  "tool": "create_deposit_payment",
+  "httpStatus": 401,
+  "message": "Invalid API credentials",
+  "suggestion": "Check that your publicKey is correct and starts with pk_live_ or pk_test_"
 }
 ```
 
-Common errors:
+The `suggestion` field is included when the MCP server recognises a common error pattern:
 
-| Message | Fix |
-|---------|-----|
-| `Both agentId and agentOwner must be provided together` | Supply both or neither |
-| `agentId contains invalid characters` | Use only `a-z A-Z 0-9 _ -` |
-| `Invalid paymentId: must be a valid UUID` | Check the ID from step 2 |
-| `Rate limit exceeded for this agent` | Wait 60 seconds |
-| `Payment not found` | Wrong `paymentId` or wrong `apiBaseUrl` |
+| Error pattern | Suggestion |
+|---------------|------------|
+| Missing `agentId` or `agentOwner` | Both agentId and agentOwner must be provided together |
+| Invalid `paymentId` format | paymentId must be a UUID returned from create_deposit_payment |
+| `401` / Unauthorized | Check that your publicKey is correct and starts with pk_live_ or pk_test_ |
+| `404` / Not found | Payment not found. Verify the paymentId is correct |
+| `429` / Rate limit | Rate limit exceeded. Wait 60 seconds before retrying |
+| Network / connection error | Cannot reach the Coinley API. Check that apiBaseUrl is correct |
+
+---
+
+## Sandbox / Test Mode
+
+Use sandbox tools to test the full payment flow without spending real crypto.
+
+### Step 1 — Create a sandbox payment
+
+```
+Tool: create_sandbox_payment
+Input: {
+  "apiBaseUrl": "https://talented-mercy-production.up.railway.app",
+  "publicKey": "pk_test_abc123",
+  "amount": 10.00,
+  "currency": "USDT"
+}
+```
+
+### Step 2 — Simulate completion or failure
+
+```
+Tool: simulate_payment
+Input: {
+  "apiBaseUrl": "https://talented-mercy-production.up.railway.app",
+  "publicKey": "pk_test_abc123",
+  "paymentId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "action": "complete"
+}
+```
+
+Use `"action": "fail"` to simulate a failed payment instead.
+
+### Step 3 — Verify status
+
+```
+Tool: get_payment_status
+Input: {
+  "apiBaseUrl": "https://talented-mercy-production.up.railway.app",
+  "paymentId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+}
+```
+
+The payment will show `status: "completed"` (or `"failed"`) with `isTest: true`.
 
 ---
 
