@@ -116,6 +116,7 @@ Create a payment session and receive a unique deposit address. The agent sends t
 | `currency` | string | ❌ | `USDT` (default) or `USDC` |
 | `metadata` | object | ❌ | Arbitrary key-value pairs attached to the payment record |
 | `idempotencyKey` | string | ❌ | Unique key to prevent duplicate payments on retries. Stored as `orderId` in payment metadata for reconciliation. |
+| `autonomous` | boolean | ❌ | Set to `true` if this payment is made without human oversight. Requires the merchant to have enabled autonomous mode for this agent. Default: `false`. |
 
 **`agentId` rules:**
 - Must be alphanumeric with underscores/hyphens only: `^[a-zA-Z0-9_-]+$`
@@ -143,6 +144,42 @@ Create a payment session and receive a unique deposit address. The agent sends t
 1. Save the `id` — you will need it for `get_payment_status`
 2. Send exactly `amount` of `currency` on `network` to `depositAddress` from your wallet
 3. Do not send to this address after `expiresAt` — the payment will be marked expired
+
+---
+
+### `get_agent_policy`
+
+Check the spending constraints and permissions the merchant has set for your agent. Call this before making a payment to understand your limits.
+
+**Input:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `apiBaseUrl` | string | ✅ | Coinley API base URL |
+| `publicKey` | string | ✅ | Merchant public key |
+| `agentId` | string | ✅ | Your agent identifier |
+
+**Returns:**
+
+```json
+{
+  "success": true,
+  "policy": {
+    "agentId": "my-agent-v1",
+    "maxAmountPerTx": 500,
+    "dailyBudget": 2000,
+    "monthlyBudget": 10000,
+    "allowedNetworks": ["base", "polygon"],
+    "allowedTokens": ["USDT", "USDC"],
+    "autonomous": true,
+    "isActive": true
+  }
+}
+```
+
+If no policy is set, `policy` will be `null` — meaning no constraints apply.
+
+If only a default (`*`) policy exists and no agent-specific one, the default policy is returned with `"isDefault": true`.
 
 ---
 
@@ -363,6 +400,7 @@ The `suggestion` field is included when the MCP server recognises a common error
 | `404` / Not found | Payment not found. Verify the paymentId is correct |
 | `429` / Rate limit | Rate limit exceeded. Wait 60 seconds before retrying |
 | Network / connection error | Cannot reach the Coinley API. Check that apiBaseUrl is correct |
+| Agent constraint violated | Agent constraint violated. Use get_agent_policy to check your limits before retrying. |
 
 ---
 

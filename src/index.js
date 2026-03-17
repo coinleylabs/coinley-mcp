@@ -26,6 +26,9 @@ function getSuggestion(toolName, errorMessage) {
   if (/ECONNREFUSED|ENOTFOUND|fetch failed|network/i.test(msg)) {
     return 'Cannot reach the Coinley API. Check that apiBaseUrl is correct';
   }
+  if (/AGENT_CONSTRAINT_VIOLATED/i.test(msg) || /budget exceeded/i.test(msg) || /not allowed.*permitted/i.test(msg) || /per-transaction limit/i.test(msg)) {
+    return 'Agent constraint violated. Use get_agent_policy to check your limits before retrying.';
+  }
   return null;
 }
 
@@ -108,8 +111,31 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: 'string',
             description: 'Optional unique key to prevent duplicate payments. If a payment with this key already exists, the existing payment is returned instead of creating a new one.',
           },
+          autonomous: {
+            type: 'boolean',
+            description: 'Set to true if this payment is being made without human oversight. Requires the merchant to have enabled autonomous mode for this agent via agent policies. Default: false.',
+          },
         },
         required: ['apiBaseUrl', 'publicKey', 'amount', 'network', 'agentId', 'agentOwner'],
+      },
+    },
+    {
+      name: 'get_agent_policy',
+      description: "Check this agent's spending constraints and permissions set by the merchant. Call this before create_deposit_payment to know your limits (max per tx, daily/monthly budgets, allowed networks/tokens, autonomous mode).",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          apiBaseUrl: { type: 'string', description: 'Coinley API base URL' },
+          publicKey: {
+            type: 'string',
+            description: 'Merchant public key (pk_live_... or pk_test_...)',
+          },
+          agentId: {
+            type: 'string',
+            description: 'Your agent identifier to look up the policy for',
+          },
+        },
+        required: ['apiBaseUrl', 'publicKey', 'agentId'],
       },
     },
     {
@@ -220,6 +246,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         metadata: args.metadata,
       };
       if (args.idempotencyKey) body.orderId = args.idempotencyKey;
+      if (args.autonomous !== undefined) body.autonomous = args.autonomous;
       const res = await fetch(`${args.apiBaseUrl}/api/deposits/create`, {
         method: 'POST',
         headers: {
@@ -228,6 +255,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         },
         body: JSON.stringify(body),
       });
+      const httpErr = await checkResponse(res, name);
+      if (httpErr) return httpErr;
+      const data = await res.json();
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+
+    if (name === 'get_agent_policy') {
+      const res = await fetch(
+        `${args.apiBaseUrl}/api/merchants/agent-policies/${encodeURIComponent(args.agentId)}`,
+        {
+          headers: { 'x-public-key': args.publicKey },
+        }
+      );
       const httpErr = await checkResponse(res, name);
       if (httpErr) return httpErr;
       const data = await res.json();
