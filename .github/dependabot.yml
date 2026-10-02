@@ -1,0 +1,27 @@
+version: 2
+
+# Version updates go to the default branch (main).
+# Dependabot *security* updates are separate: GitHub always opens those against the default branch.
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # Wait a week before proposing a new release, so a hijacked publish is likely caught and pulled first.
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        patterns: ["*"]
+
